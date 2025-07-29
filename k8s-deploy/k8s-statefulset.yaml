@@ -1,0 +1,89 @@
+# Alternative deployment using StatefulSet for persistent storage per pod
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: raganything
+  namespace: raganything
+spec:
+  serviceName: raganything
+  replicas: 3
+  selector:
+    matchLabels:
+      app: raganything
+  template:
+    metadata:
+      labels:
+        app: raganything
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+      - name: raganything
+        image: your-registry/raganything:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+        envFrom:
+        - configMapRef:
+            name: raganything-config
+        - secretRef:
+            name: raganything-secrets
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "2"
+          limits:
+            memory: "8Gi"
+            cpu: "4"
+        volumeMounts:
+        - name: storage
+          mountPath: /app/rag_storage
+        - name: models
+          mountPath: /home/raguser/.mineru/models
+        livenessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - "import raganything; print('OK')"
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - "import raganything; print('OK')"
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+      volumes:
+      - name: models
+        persistentVolumeClaim:
+          claimName: raganything-models
+  volumeClaimTemplates:
+  - metadata:
+      name: storage
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: "fast-ssd"  # Use appropriate storage class
+      resources:
+        requests:
+          storage: 20Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: raganything-headless
+  namespace: raganything
+spec:
+  clusterIP: None
+  ports:
+  - port: 8000
+    targetPort: 8000
+  selector:
+    app: raganything

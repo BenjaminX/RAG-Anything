@@ -1,0 +1,9 @@
+[project]
+name = "rag-anything"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "huggingface-hub>=0.34.2",
+    "lightrag-hku>=1.4.4",
+    "mineru>=2.1.8",
+]

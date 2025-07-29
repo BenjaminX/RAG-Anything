@@ -1,0 +1,65 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: raganything-process-docs
+  namespace: raganything
+spec:
+  template:
+    metadata:
+      labels:
+        app: raganything-job
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+      - name: raganything
+        image: your-registry/raganything:latest  # Replace with your image
+        imagePullPolicy: Always
+        command: ["python"]
+        args: 
+        - "-m"
+        - "raganything"
+        - "process"
+        - "/app/documents"  # Mount your documents here
+        envFrom:
+        - configMapRef:
+            name: raganything-config
+        - secretRef:
+            name: raganything-secrets
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "2"
+          limits:
+            memory: "8Gi"
+            cpu: "4"
+            nvidia.com/gpu: 1  # Optional: for GPU acceleration
+        volumeMounts:
+        - name: storage
+          mountPath: /app/rag_storage
+        - name: storage
+          mountPath: /app/output
+          subPath: output
+        - name: storage
+          mountPath: /app/logs
+          subPath: logs
+        - name: models
+          mountPath: /home/raguser/.mineru/models
+        - name: documents
+          mountPath: /app/documents
+          readOnly: true
+      volumes:
+      - name: storage
+        persistentVolumeClaim:
+          claimName: raganything-storage
+      - name: models
+        persistentVolumeClaim:
+          claimName: raganything-models
+      - name: documents
+        persistentVolumeClaim:
+          claimName: documents-pvc  # Create this PVC with your documents
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400  # Clean up after 24 hours

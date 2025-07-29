@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  raganything:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: raganything:latest
+    container_name: raganything
+    environment:
+      # OpenAI API configuration
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      
+      # Parser configuration
+      - PARSER=${PARSER:-mineru}
+      - PARSE_METHOD=${PARSE_METHOD:-auto}
+      
+      # Storage directories
+      - WORKING_DIR=/app/rag_storage
+      - OUTPUT_DIR=/app/output
+      
+      # Processing configuration
+      - ENABLE_IMAGE_PROCESSING=${ENABLE_IMAGE_PROCESSING:-true}
+      - ENABLE_TABLE_PROCESSING=${ENABLE_TABLE_PROCESSING:-true}
+      - ENABLE_EQUATION_PROCESSING=${ENABLE_EQUATION_PROCESSING:-true}
+      
+      # Context configuration
+      - CONTEXT_WINDOW=${CONTEXT_WINDOW:-1}
+      - CONTEXT_MODE=${CONTEXT_MODE:-page}
+      - MAX_CONTEXT_TOKENS=${MAX_CONTEXT_TOKENS:-2000}
+      
+      # Performance settings
+      - MAX_CONCURRENT_FILES=${MAX_CONCURRENT_FILES:-1}
+      
+    volumes:
+      # Persistent storage for RAG data
+      - ./rag_storage:/app/rag_storage
+      - ./output:/app/output
+      - ./logs:/app/logs
+      
+      # Mount documents to process
+      - ./documents:/app/documents:ro
+      
+      # MinerU models cache (optional, speeds up startup)
+      - mineru_models:/home/raguser/.mineru/models
+      
+    ports:
+      # Expose API port if running as service
+      - "8000:8000"
+      
+    healthcheck:
+      test: ["CMD", "python", "-c", "import raganything; print('OK')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+      
+    restart: unless-stopped
+    
+    # Resource limits for K8s deployment reference
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G
+
+  # Optional: PostgreSQL for vector storage
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: raganything-postgres
+    environment:
+      - POSTGRES_USER=raganything
+      - POSTGRES_PASSWORD=raganything
+      - POSTGRES_DB=raganything
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U raganything"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Optional: Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: raganything-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  mineru_models:
+  postgres_data:
+  redis_data:
