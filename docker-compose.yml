@@ -1,0 +1,107 @@
+version: '3.8'
+
+services:
+  raganything:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: raganything:latest
+    container_name: raganything
+    volumes:
+      # Mount directories for persistence
+      - ./rag_storage:/app/rag_storage
+      - ./output:/app/output
+      - ./inputs:/app/inputs
+      - ./logs:/app/logs
+      # Mount examples for easy access
+      - ./examples:/app/examples
+      # Mount .env file if exists
+      - ./.env:/app/.env:ro
+    environment:
+      # Override these with your own values
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-3-large}
+      # Parser settings
+      - PARSER=${PARSER:-mineru}
+      - PARSE_METHOD=${PARSE_METHOD:-auto}
+      # Processing settings
+      - ENABLE_IMAGE_PROCESSING=${ENABLE_IMAGE_PROCESSING:-true}
+      - ENABLE_TABLE_PROCESSING=${ENABLE_TABLE_PROCESSING:-true}
+      - ENABLE_EQUATION_PROCESSING=${ENABLE_EQUATION_PROCESSING:-true}
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - VERBOSE=${VERBOSE:-false}
+    networks:
+      - raganything-network
+    # Uncomment for GPU support
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    
+  # Optional: Add vector database service (e.g., Qdrant)
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: raganything-qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - ./qdrant_storage:/qdrant/storage
+    networks:
+      - raganything-network
+    profiles:
+      - with-qdrant
+
+  # Optional: Add PostgreSQL for storage
+  postgres:
+    image: postgres:15-alpine
+    container_name: raganything-postgres
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-raganything}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-raganything123}
+      - POSTGRES_DB=${POSTGRES_DB:-raganything}
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    networks:
+      - raganything-network
+    profiles:
+      - with-postgres
+
+  # Optional: Add Neo4j for graph storage
+  neo4j:
+    image: neo4j:5-community
+    container_name: raganything-neo4j
+    environment:
+      - NEO4J_AUTH=${NEO4J_AUTH:-neo4j/raganything123}
+      - NEO4J_PLUGINS=["graph-data-science"]
+    ports:
+      - "7474:7474"  # HTTP
+      - "7687:7687"  # Bolt
+    volumes:
+      - ./neo4j_data:/data
+      - ./neo4j_logs:/logs
+    networks:
+      - raganything-network
+    profiles:
+      - with-neo4j
+
+networks:
+  raganything-network:
+    driver: bridge
+
+volumes:
+  rag_storage:
+  output:
+  inputs:
+  logs:
+  qdrant_storage:
+  postgres_data:
+  neo4j_data:
+  neo4j_logs:

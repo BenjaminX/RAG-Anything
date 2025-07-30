@@ -1,0 +1,75 @@
+# Git files
+.git/
+.gitignore
+.github/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Test and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Documentation
+docs/_build/
+*.md
+!README.md
+
+# Logs and outputs
+*.log
+logs/
+output/
+rag_storage/
+inputs/
+
+# Docker files (don't copy Docker files into the image)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Environment files (will be mounted as needed)
+.env
+.env.*
+
+# Data directories
+postgres_data/
+neo4j_data/
+neo4j_logs/
+qdrant_storage/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*~
+
+# Large model files
+*.bin
+*.pth
+*.onnx
+*.safetensors
+models/

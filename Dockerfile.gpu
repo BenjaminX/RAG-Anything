@@ -1,0 +1,115 @@
+# GPU-enabled Dockerfile for RAG-Anything with CUDA support
+# For use with NVIDIA GPUs
+
+# Stage 1: CUDA base image
+FROM nvidia/cuda:12.1.0-devel-ubuntu22.04 AS base
+
+# Install Python and system dependencies
+RUN apt-get update && apt-get install -y \
+    # Python 3.10
+    python3.10 \
+    python3.10-dev \
+    python3-pip \
+    # Basic tools
+    curl \
+    wget \
+    git \
+    build-essential \
+    # LibreOffice for document processing
+    libreoffice \
+    # Image processing libraries
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    libglu1-mesa \
+    # PDF processing
+    poppler-utils \
+    # Clean up
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create symbolic links for Python
+RUN ln -s /usr/bin/python3.10 /usr/bin/python && \
+    ln -s /usr/bin/pip3 /usr/bin/pip
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    CUDA_VISIBLE_DEVICES=0 \
+    TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;8.9;9.0"
+
+# Stage 2: Dependencies installation
+FROM base AS dependencies
+
+WORKDIR /app
+
+# Copy requirements files
+COPY requirements.txt setup.py MANIFEST.in ./
+COPY raganything/__init__.py ./raganything/
+
+# Upgrade pip and install build tools
+RUN pip install --upgrade pip setuptools wheel
+
+# Install PyTorch with CUDA support
+RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# Install base requirements
+RUN pip install -r requirements.txt
+
+# Install optional dependencies for full feature support
+RUN pip install Pillow>=10.0.0 reportlab>=4.0.0
+
+# Stage 3: Final image
+FROM base AS final
+
+# Create non-root user
+RUN useradd -m -u 1000 -s /bin/bash appuser
+
+WORKDIR /app
+
+# Copy installed packages from dependencies stage
+COPY --from=dependencies /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
+COPY --from=dependencies /usr/local/bin /usr/local/bin
+
+# Copy application code
+COPY . .
+
+# Install the package in development mode
+RUN pip install -e '.[all]'
+
+# Create necessary directories with proper permissions
+RUN mkdir -p /app/rag_storage /app/output /app/logs /app/inputs && \
+    chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
+
+# Set working directory permissions
+VOLUME ["/app/rag_storage", "/app/output", "/app/inputs", "/app/logs"]
+
+# Expose ports
+EXPOSE 8000 8080 30000 7860
+
+# Default environment variables
+ENV WORKING_DIR=/app/rag_storage \
+    OUTPUT_DIR=/app/output \
+    INPUT_DIR=/app/inputs \
+    LOG_DIR=/app/logs \
+    PARSER=mineru \
+    PARSE_METHOD=auto \
+    ENABLE_IMAGE_PROCESSING=true \
+    ENABLE_TABLE_PROCESSING=true \
+    ENABLE_EQUATION_PROCESSING=true \
+    DEVICE=cuda:0
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}'); from raganything import RAGAnything; print('Health check passed')" || exit 1
+
+# Default command
+CMD ["python", "-c", "import torch; print(f'CUDA available: {torch.cuda.is_available()}'); print(f'GPU count: {torch.cuda.device_count()}'); print('RAG-Anything GPU Docker container is ready.')"]
