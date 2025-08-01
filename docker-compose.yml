@@ -1,12 +1,14 @@
 version: '3.8'
 
 services:
+  # Main RAGAnything service
   raganything:
     build:
       context: .
       dockerfile: Dockerfile
     image: raganything:latest
     container_name: raganything
+    command: python -c "print('RAG-Anything is ready. Use docker exec to run commands.'); import time; time.sleep(infinity)"
     volumes:
       # Mount directories for persistence
       - ./rag_storage:/app/rag_storage
@@ -14,27 +16,60 @@ services:
       - ./inputs:/app/inputs
       - ./logs:/app/logs
       # Mount examples for easy access
-      - ./examples:/app/examples
+      - ./examples:/app/examples:ro
       # Mount .env file if exists
       - ./.env:/app/.env:ro
     environment:
-      # Override these with your own values
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # API Configuration
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-your_api_key}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
       - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      - LLM_BINDING=${LLM_BINDING:-openai}
+      - LLM_BINDING_HOST=${LLM_BINDING_HOST:-https://api.openai.com/v1}
+      - LLM_BINDING_API_KEY=${LLM_BINDING_API_KEY:-${OPENAI_API_KEY:-your_api_key}}
+      
+      # Embedding Configuration
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-3-large}
+      - EMBEDDING_BINDING=${EMBEDDING_BINDING:-openai}
+      - EMBEDDING_BINDING_HOST=${EMBEDDING_BINDING_HOST:-https://api.openai.com/v1}
+      - EMBEDDING_BINDING_API_KEY=${EMBEDDING_BINDING_API_KEY:-${OPENAI_API_KEY:-your_api_key}}
+      - EMBEDDING_DIM=${EMBEDDING_DIM:-3072}
+      
       # Parser settings
       - PARSER=${PARSER:-mineru}
       - PARSE_METHOD=${PARSE_METHOD:-auto}
+      - OUTPUT_DIR=/app/output
+      - WORKING_DIR=/app/rag_storage
+      - INPUT_DIR=/app/inputs
+      - LOG_DIR=/app/logs
+      
       # Processing settings
       - ENABLE_IMAGE_PROCESSING=${ENABLE_IMAGE_PROCESSING:-true}
       - ENABLE_TABLE_PROCESSING=${ENABLE_TABLE_PROCESSING:-true}
       - ENABLE_EQUATION_PROCESSING=${ENABLE_EQUATION_PROCESSING:-true}
+      
+      # Storage Configuration for Qdrant
+      - LIGHTRAG_VECTOR_STORAGE=${LIGHTRAG_VECTOR_STORAGE:-QdrantStorage}
+      - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
+      - QDRANT_API_KEY=${QDRANT_API_KEY:-}
+      
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - VERBOSE=${VERBOSE:-false}
     networks:
       - raganything-network
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "from raganything import RAGAnything; print('Health check passed')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
     # Uncomment for GPU support
     # deploy:
     #   resources:
@@ -43,21 +78,31 @@ services:
     #         - driver: nvidia
     #           count: 1
     #           capabilities: [gpu]
-    
-  # Optional: Add vector database service (e.g., Qdrant)
+
+  # Vector database service (Qdrant) - Default service for RAG
   qdrant:
     image: qdrant/qdrant:latest
     container_name: raganything-qdrant
     ports:
       - "6333:6333"
+      - "6334:6334"  # gRPC port
     volumes:
-      - ./qdrant_storage:/qdrant/storage
+      - qdrant_storage:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__LOG_LEVEL=INFO
     networks:
       - raganything-network
-    profiles:
-      - with-qdrant
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:6333/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
-  # Optional: Add PostgreSQL for storage
+  # PostgreSQL for advanced storage (optional profile)
   postgres:
     image: postgres:15-alpine
     container_name: raganything-postgres
@@ -68,40 +113,123 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ./postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     networks:
       - raganything-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-raganything} -d ${POSTGRES_DB:-raganything}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     profiles:
       - with-postgres
+      - full-stack
 
-  # Optional: Add Neo4j for graph storage
+  # Neo4j for graph storage (optional profile)
   neo4j:
     image: neo4j:5-community
     container_name: raganything-neo4j
     environment:
       - NEO4J_AUTH=${NEO4J_AUTH:-neo4j/raganything123}
-      - NEO4J_PLUGINS=["graph-data-science"]
+      - NEO4J_dbms_memory_pagecache_size=1G
+      - NEO4J_dbms_memory_heap_max__size=1G
+      - NEO4J_dbms_security_procedures_unrestricted=gds.*
+      - NEO4J_dbms_security_procedures_allowlist=gds.*
+      - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
     ports:
       - "7474:7474"  # HTTP
       - "7687:7687"  # Bolt
     volumes:
-      - ./neo4j_data:/data
-      - ./neo4j_logs:/logs
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_import:/var/lib/neo4j/import
+      - neo4j_plugins:/plugins
     networks:
       - raganything-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
     profiles:
       - with-neo4j
+      - full-stack
+
+  # Ollama for local LLM (optional profile)
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: raganything-ollama
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   networks:
+  #     - raganything-network
+  #   restart: unless-stopped
+  #   environment:
+  #     - OLLAMA_HOST=0.0.0.0
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 10s
+  #   profiles:
+  #     - with-ollama
+  #     - full-stack
+    # Uncomment for GPU support
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # Redis for caching (optional profile)
+  redis:
+    image: redis:7-alpine
+    container_name: raganything-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - raganything-network
+    restart: unless-stopped
+    command: redis-server --save 20 1 --loglevel warning --requirepass ${REDIS_PASSWORD:-raganything123}
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD:-raganything123}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    profiles:
+      - with-redis
+      - full-stack
 
 networks:
   raganything-network:
     driver: bridge
 
 volumes:
-  rag_storage:
-  output:
-  inputs:
-  logs:
   qdrant_storage:
+    driver: local
   postgres_data:
+    driver: local
   neo4j_data:
+    driver: local
   neo4j_logs:
+    driver: local
+  neo4j_import:
+    driver: local
+  neo4j_plugins:
+    driver: local
+  # ollama_data:
+  #   driver: local
+  redis_data:
+    driver: local
