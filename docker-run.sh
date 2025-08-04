@@ -28,6 +28,7 @@ show_usage() {
     echo "  ps          List running services"
     echo "  exec        Execute command in container"
     echo "  restart     Restart services"
+    echo "  debug       Show debug information and troubleshoot"
     echo ""
     echo "Options:"
     echo "  -d, --detach        Run in background"
@@ -67,7 +68,7 @@ while [[ $# -gt 0 ]]; do
             show_usage
             exit 0
             ;;
-        up|down|logs|ps|exec|restart)
+        up|down|logs|ps|exec|restart|debug)
             COMMAND="$1"
             shift
             break
@@ -146,6 +147,70 @@ case $COMMAND in
         echo -e "${YELLOW}Restarting services...${NC}"
         docker-compose $PROFILE restart
         echo -e "${GREEN}Services restarted${NC}"
+        ;;
+        
+    debug)
+        echo -e "${BLUE}RAG-Anything Docker Debug Information${NC}"
+        echo -e "${BLUE}======================================${NC}"
+        
+        # Check Docker version
+        echo -e "\n${YELLOW}Docker Version:${NC}"
+        docker --version
+        docker-compose --version
+        
+        # Check service status
+        echo -e "\n${YELLOW}Service Status:${NC}"
+        docker-compose $PROFILE ps
+        
+        # Check unhealthy services
+        echo -e "\n${YELLOW}Checking for unhealthy services...${NC}"
+        UNHEALTHY=$(docker-compose $PROFILE ps --format json | grep -o '"Health":"[^"]*"' | grep -v "healthy" || true)
+        if [ -n "$UNHEALTHY" ]; then
+            echo -e "${RED}Found unhealthy services!${NC}"
+            
+            # Show logs for unhealthy services
+            if docker ps -a | grep -q "raganything-qdrant.*unhealthy"; then
+                echo -e "\n${YELLOW}Qdrant logs:${NC}"
+                docker logs raganything-qdrant --tail 50
+            fi
+            
+            if docker ps -a | grep -q "raganything.*unhealthy"; then
+                echo -e "\n${YELLOW}RAGAnything logs:${NC}"
+                docker logs raganything --tail 50
+            fi
+        else
+            echo -e "${GREEN}All services appear healthy${NC}"
+        fi
+        
+        # Check port availability
+        echo -e "\n${YELLOW}Checking port availability:${NC}"
+        for port in 6333 6334 5432 7474 7687 11434 6379; do
+            if nc -z localhost $port 2>/dev/null; then
+                echo -e "${GREEN}Port $port is open${NC}"
+            else
+                echo -e "${RED}Port $port is not accessible${NC}"
+            fi
+        done
+        
+        # Check disk space
+        echo -e "\n${YELLOW}Disk Space:${NC}"
+        df -h . | grep -v "Filesystem"
+        
+        # Check Docker resources
+        echo -e "\n${YELLOW}Docker System Info:${NC}"
+        docker system df
+        
+        # Suggest fixes
+        echo -e "\n${BLUE}Common Fixes:${NC}"
+        echo "1. If Qdrant is unhealthy:"
+        echo "   - Try: docker-compose $PROFILE down && docker-compose $PROFILE up -d"
+        echo "   - Check if port 6333 is already in use"
+        echo ""
+        echo "2. If builds fail:"
+        echo "   - Try: docker-compose $PROFILE build --no-cache"
+        echo ""
+        echo "3. If out of space:"
+        echo "   - Try: docker system prune -a"
         ;;
         
     *)
