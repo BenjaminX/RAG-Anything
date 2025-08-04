@@ -6,7 +6,7 @@ services:
       dockerfile: Dockerfile
     image: raganything:latest
     container_name: raganything
-    command: python -c "print('RAG-Anything is ready. Use docker exec to run commands.'); import time; while True: time.sleep(3600)"
+    command: ["tail", "-f", "/dev/null"]
     volumes:
       # Mount directories for persistence
       - ./rag_storage:/app/rag_storage
