@@ -61,14 +61,6 @@ services:
     stdin_open: true
     tty: true
     restart: unless-stopped
-    # Uncomment for GPU support
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
 
   # Vector database service (Qdrant) - Default service for RAG
   qdrant:
@@ -86,12 +78,6 @@ services:
     networks:
       - raganything-network
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--tries=1", "--spider", "http://localhost:6333/"]
-      interval: 30s
-      timeout: 10s
-      retries: 10
-      start_period: 40s
 
   # PostgreSQL for advanced storage (optional profile)
   postgres:
@@ -108,12 +94,6 @@ services:
     networks:
       - raganything-network
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-raganything} -d ${POSTGRES_DB:-raganything}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
     profiles:
       - with-postgres
       - full-stack
@@ -140,46 +120,26 @@ services:
     networks:
       - raganything-network
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
-      interval: 15s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
     profiles:
       - with-neo4j
       - full-stack
 
   # Ollama for local LLM (optional profile)
-  # ollama:
-  #   image: ollama/ollama:latest
-  #   container_name: raganything-ollama
-  #   ports:
-  #     - "11434:11434"
-  #   volumes:
-  #     - ollama_data:/root/.ollama
-  #   networks:
-  #     - raganything-network
-  #   restart: unless-stopped
-  #   environment:
-  #     - OLLAMA_HOST=0.0.0.0
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
-  #     start_period: 10s
-  #   profiles:
-  #     - with-ollama
-  #     - full-stack
-    # Uncomment for GPU support
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+  ollama:
+    image: ollama/ollama:latest
+    container_name: raganything-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - raganything-network
+    restart: unless-stopped
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    profiles:
+      - with-ollama
+      - full-stack
 
   # Redis for caching (optional profile)
   redis:
@@ -193,12 +153,6 @@ services:
       - raganything-network
     restart: unless-stopped
     command: redis-server --save 20 1 --loglevel warning --requirepass ${REDIS_PASSWORD:-raganything123}
-    healthcheck:
-      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD:-raganything123}", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
     profiles:
       - with-redis
       - full-stack
@@ -220,7 +174,7 @@ volumes:
     driver: local
   neo4j_plugins:
     driver: local
-  # ollama_data:
-  #   driver: local
+  ollama_data:
+    driver: local
   redis_data:
     driver: local
